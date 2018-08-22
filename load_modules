@@ -1,0 +1,6 @@
+#!/bin/bash
+module load hdf5/1.8.12
+module load gsl/1.16-intel
+module load fftw/2.1.5-mpich-intel
+module load mercurial
+module load mpi/mvapich2-intel2013.2

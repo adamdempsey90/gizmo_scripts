@@ -1,0 +1,15 @@
+#!/bin/bash
+## This line is a comment, the following lines are for Moab
+#MOAB -l nodes=1:ppn=24
+#MOAB -l walltime=12:00:00
+#MOAB -q normal
+#MOAB -N ring
+#MOAB -j oe
+#MSUB -m abe
+#MSUB -A p20850
+cd $PBS_O_WORKDIR
+ulimit -s unlimited
+. load_modules
+
+mpirun -np 24 ./GIZMO_star keplerian.params
+
