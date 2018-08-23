@@ -6,17 +6,18 @@ def load_file(num,base='snapshot',gamma=1.0001):
         time = f['Header'].attrs['Time']
         try:
             grp = f['PartType3']
-            vel = grp['Velocities'][...][0]
-            pos = grp['Coordinates'][...][0]
-            m = grp['Masses'][...][0]
-            st = Star(mass=m,pos=pos,vel=vel)
+            vel = grp['Velocities'][...]
+            pos = grp['Coordinates'][...]
+            masses = grp['Masses'][...]
+            st = [Star(mass=m,pos=p,vel=v) for m,p,v in zip(masses,pos,vel)]
         except:
             print('No star')
-            st = Star()
+            st = [Star()]
 
 
         density = f['PartType0/Density'][...]
         mass = f['PartType0/Masses'][...]
+        smooth = f['PartType0/SmoothingLengt'][...]
         e = f['PartType0/InternalEnergy'][...]
         temp = gamma*e
         #pres = e*density *(gamma-1)
@@ -34,7 +35,7 @@ def load_file(num,base='snapshot',gamma=1.0001):
     phi = np.arctan2(y,x)
     vr = np.cos(phi) * vel[:,0] + np.sin(phi) * vel[:,1]
     vphi = -np.sin(phi) * vel[:,0] + np.cos(phi) * vel[:,1]
-    return x,y,r,phi,density,vr,vphi,temp,mass,pot,st,time
+    return x,y,r,phi,density,vr,vphi,temp,mass,pot,smooth,st,time
 class Star():
     def __init__(self,mass=1,pos=np.zeros((3,)),vel=np.zeros((3,))):
         self.mass = mass
@@ -50,8 +51,22 @@ class Star():
             return
         ax.plot(self.x,self.y,'*',ms=ms,c=c,**kargs)
 class Snap():
-    def __init__(self,num=0,base='out/snapshot',gamma=1.0001):
-        self.x,self.y,self.r,self.phi,self.dens,self.vr,self.vp,self.temp,self.mass,self.pot,self.star,self.time = load_file(num,base=base,gamma=gamma)
+    def __init__(self,num=0,base='out/snapshot',gamma=1.0001,shift=False):
+        self.x,self.y,self.r,self.phi,self.dens,self.vr,self.vp,self.temp,self.mass,self.pot,self.smooth,self.star,self.time = load_file(num,base=base,gamma=gamma)
+
+        if shift and len(self.star)>1:
+            p0 = np.arctan2(self.star[1].pos[1],self.star[1].pos[0])
+            self.phi -= p0
+            self.x = self.r*np.cos(self.phi)
+            self.y = self.r*np.sin(self.phi)
+            for s in self.star:
+                p = np.arctan2(s.y,s.x)
+                p -= p0
+                r = np.sqrt(s.x**2 + s.y**2)
+                s.x = r*np.cos(p)
+                s.y = r*np.sin(p)
+
+
         self.vol = self.mass/self.dens
         self.gamma = gamma
     def plot2d(self,val='dens',func=None,rmax=3,rmin=.05,cart=True,lims=None,fig=None,ax=None,**kargs):
@@ -108,7 +123,8 @@ class Snap():
 
         ax.plot(self.x[ind],self.y[ind],'.',ms=ms)
 
-        self.star.plot_pos(ax)
+        for s in self.star:
+            s.plot_pos(ax)
         ax.plot(0,0,'.',ms=5,c='r')
 
         ax.minorticks_on()
@@ -161,12 +177,13 @@ class Snap():
         dx = np.diff(x)[0]
         bins = np.zeros(x.shape)
         tot = np.zeros(x.shape)
+        xm = min(x)
         for r,d in zip(self.r,q):
-            i = int((r-.1)/dx)
+            i = int((r-xm)/dx)
             if (i>=0)&(i<nx):
                 tot[i] += 1
                 bins[i] += d
-        bins /= tot
+        bins /= (2*np.pi*dx*x)
         return bins
 def _create_colorbar(ax,norm,cax=None,cmap='viridis',**kargs):
     """

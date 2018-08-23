@@ -70,7 +70,7 @@ def get_density_pressure(x,y,z,H=0,delta=0,sig0=1,sig_floor=.001,**kargs):
         density = sig0*dprof_gauss(r,phi,**kargs)
         density += sig_floor
     else:
-        density = sig0 * dprof(r,phi,**kargs) / dprof(1.,0.,**kargs)
+        density = sig0 * dprof(r,phi,**kargs)
         density += sig_floor
 
     c2 = H**2 * r**(delta)
@@ -160,8 +160,20 @@ def makeIC_box(**kargs):
     #  first - open the hdf5 ics file, with the desired filename
 
     Ngrains = 0
-    if kargs['star']:
-        Ngrains = 1
+
+    if kargs['star'] and kargs['jupiter']:
+        Ngrains = 2
+        mp = kargs['mp']
+        pos = np.array([[-mp,0,0],[1.,0,0]])
+        vel = np.array([[0,-mp,0],[0,1.,0]])
+        masses = np.array([1.,mp])
+
+    elif kargs['star']:
+        Ngrains += 1
+        pos = np.zeros((3,))
+        vel = np.zeros((3,))
+        masses = np.zeros((1,))
+
 
     with h5py.File(fname,'w') as file:
 
@@ -238,14 +250,12 @@ def makeIC_box(**kargs):
         #   what we had above for the gas. EXCEPT there are no "InternalEnergy" or "MagneticField" fields (for
         #   obvious reasons).
 
-        if kargs['star']:
+        if Ngrains > 0:
             p = file.create_group("PartType3")
-            q=np.zeros((Ngrains,3));
-            p.create_dataset("Coordinates",data=q)
-            q=np.zeros((Ngrains,3));
-            p.create_dataset("Velocities",data=q)
-            p.create_dataset("ParticleIDs",data=Ngas+1)
-            p.create_dataset("Masses",data=np.ones((1,)))
+            p.create_dataset("Coordinates",data=pos)
+            p.create_dataset("Velocities",data=vel)
+            p.create_dataset("ParticleIDs",data=Ngas+1 + np.arange(Ngrains))
+            p.create_dataset("Masses",data=masses)
 
         # no PartType4 for this IC
         # no PartType5 for this IC
@@ -274,6 +284,8 @@ if __name__ == "__main__":
     parser.add_argument('-soft',type=float,default=.01,help='Potential softening')
     parser.add_argument('-rinner',type=float,default=.2,help='Inner radius')
     parser.add_argument('-router',type=float,default=3,help='Outer radius')
+    parser.add_argument('--jupiter',action='store_true',help='Add a jupiter mass planet at 1 AU')
+    parser.add_argument('-mp',type=float,default=1e-3,help='Planet mass')
     args = vars(parser.parse_args())
 
     print(args)
