@@ -1,6 +1,207 @@
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.neighbors import KDTree
+class SPHpoint():
+    fields = ['dens','vr','vp','temp','pot']
+    def __init__(self,x,y,h,vol,mass,val):
+        self.x = x
+        self.y = y
+        self.r = np.sqrt(x**2 + y**2)
+        self.h = h
+        self.val = val
+        self.vol = vol
+        self.mass = mass
+        norm = 40./(7*np.pi)
+        self.ih3 = norm/(2*h)**2
+        for i,name in enumerate(self.fields):
+            setattr(self,name,val[i])
+    def dist(self,x,y):
+        return np.sqrt((x-self.x)**2 + (y-self.y)**2)
+    def kernel(self,u):
+        try:
+            wk = np.zeros(u.shape)
+        except AttributeError:
+            return self.kernel_single(u)
+
+        ind = (u < .5)&(u>=0)
+        nind = (u>=.5)&(u<=1)
+        wk[ind] = self._kernel_lt(u[ind])
+        wk[nind] = self._kernel_gt(u[nind])
+        return wk
+    def kernel_single(self,u):
+        if u<0 or u>1:
+            return 0.
+        if u < .5:
+            return self._kernel_lt(u)
+
+        return self._kernel_gt(u)
+
+    def _kernel_lt(self,u):
+        wk = (1.0 + 6.0 * (u - 1.0) * u * u)
+        return wk*self.ih3
+    def _kernel_gt(self,u):
+        u2 = (1.-u)**2
+        wk = 2.0*(1.0-u) * u2
+        return wk*self.ih3
+    def weight(self,x,y):
+        u = self.dist(x,y)/(2*self.h)
+        wk = self.kernel(u)
+        return wk #*self.vol
+
+def convert_to_sph(fld):
+    return  [SPHpoint(fld.x[i],fld.y[i],fld.smooth[i],fld.vol[i],fld.mass[i],
+              np.array([fld.dens[i],fld.vr[i],fld.vp[i],fld.temp[i],fld.pot[i]])) for i in range(len(fld.x))]
+
+class Mesh():
+    def __init__(self,ri,ro,nr):
+        nphi = int(2*np.pi*nr/np.log(ro/ri))
+        r = np.exp(np.linspace(np.log(ri),np.log(ro),nr))
+        phi = np.linspace(-np.pi,np.pi,nphi)
+        self.r = r
+        self.phi = phi
+
+    def add_points(self,points):
+        rr,pp,zz = self.interpolate(points,self.r,self.phi)
+        self.rr = rr
+        self.pp = pp
+        self.xx = rr*np.cos(pp)
+        self.yy = rr*np.sin(pp)
+        shape = len(self.r),len(self.phi)
+        for i,name in enumerate(points[0].fields):
+            setattr(self,name,zz[:,i].reshape(shape))
+    def plot2d(self,val='dens',func=None,rmax=10,rmin=0,cart=True,lims=None,logx=False,logy=False,
+               fig=None,ax=None,**kargs):
+        import matplotlib.colors as colors
+
+        if ax is None:
+            fig,ax=plt.subplots(figsize=(6,6))
+
+
+        indx = (self.r <= rmax)&(self.r>=rmin)
+
+
+
+        if cart:
+            x = self.xx[indx,:]
+            y = self.yy[indx,:]
+            lbl = ('$x$','$y$')
+        else:
+            x = self.r[indx,:]
+            y = self.phi[indx,:]
+            lbl = ('$r$','$\\phi$')
+
+        if func is None:
+            try:
+                q = getattr(self,val)[indx,:]
+            except AttributeError:
+                print(val, 'not a valid field!')
+                return None,None
+        else:
+            q = func(self)[indx,:]
+
+        norm = kargs.pop('norm',colors.Normalize())
+        shading = kargs.pop('shading','gouraud')
+        cmap = kargs.pop('cmap','viridis')
+        ax.pcolormesh(x,y,q,norm=norm,shading=shading,cmap=cmap,**kargs)
+        _create_colorbar(ax,norm,cmap=cmap)
+
+        if lims is not None:
+            ax.set_xlim(*lims[:2])
+            ax.set_ylim(*lims[-2:])
+
+        ax.minorticks_on()
+        ax.tick_params(labelsize=20)
+        ax.set_xlabel(lbl[0],fontsize=20)
+        ax.set_ylabel(lbl[1],fontsize=20)
+        if logx:
+            ax.set_xscale('log')
+        if logy:
+            ax.set_yscale('log')
+        fig.tight_layout()
+        return fig,ax
+    def semilogx(self,**kargs):
+        logx = kargs.pop('logx',True)
+        logx = True
+        logy = kargs.pop('logy',False)
+        logy = False
+
+        return self.plot(logx=logx,logy=logy,**kargs)
+    def semilogy(self,**kargs):
+        logx = kargs.pop('logx',False)
+        logx = False
+        logy = kargs.pop('logy',True)
+        logy = True
+
+        return self.plot(logx=logx,logy=logy,**kargs)
+    def loglog(self,**kargs):
+        logx = kargs.pop('logx',True)
+        logx = True
+        logy = kargs.pop('logy',True)
+        logy = True
+
+        return self.plot(logx=logx,logy=logy,**kargs)
+    def plot(self,val='dens',func=None,ylbl='',rmax=10,rmin=0,cart=True,logx=False,logy=False,fig=None,ax=None,**kargs):
+        import matplotlib.colors as colors
+
+        if ax is None:
+            fig,ax=plt.subplots(figsize=(8,6))
+
+
+        indx = (self.r <= rmax)&(self.r>=rmin)
+
+
+        if func is None:
+            try:
+                q = getattr(self,val).mean(axis=1)[indx]
+            except AttributeError:
+                print(val, 'not a valid field!')
+                return None,None
+        else:
+            q = func(self).mean(axis=1)[indx]
+
+        ax.plot(self.r[indx],q,**kargs)
+        ax.minorticks_on()
+        ax.tick_params(labelsize=20)
+        ax.set_xlabel('$r$',fontsize=20)
+        ax.set_ylabel(ylbl,fontsize=20)
+
+
+        if logx:
+            ax.set_xscale('log')
+        if logy:
+            ax.set_yscale('log')
+        fig.tight_layout()
+        return fig,ax
+
+    def get_mesh(self,r,phi):
+        rr,pp = np.meshgrid(r,phi,indexing='ij')
+        xx,yy = rr*np.cos(pp),rr*np.sin(pp)
+        xx = xx.ravel()
+        yy = yy.ravel()
+        mesh_points = np.vstack((xx,yy)).T
+        mesh_tree = KDTree(mesh_points)
+        return xx,yy,rr,pp,mesh_tree
+    def get_index_list(self,points,mesh_tree,rmin=.3,rmax=3):
+        dist = lambda h: 2.1*h
+        inds = [mesh_tree.query_radius([np.array([p.x,p.y])],r=dist(p.h))[0] if (p.r - dist(p.h)<= rmax)&(p.r + dist(p.h)>=rmin) else np.array([])
+               for p in points]
+        return inds
+    def interpolate(self,points,r,phi):
+        rmin = r.min()
+        rmax = r.max()
+        xx,yy,rr,pp,mesh_tree = self.get_mesh(r,phi)
+        inds = self.get_index_list(points,mesh_tree,rmin=rmin,rmax=rmax)
+        nf = len(points[0].val)
+        zz = np.zeros(xx.shape+(nf,))
+        for ind,p in zip(inds,points):
+            if len(ind) > 0:
+                w = p.weight(xx[ind],yy[ind])
+                for j,wj in zip(ind,w):
+                    zz[j,:] += wj*p.vol*p.val
+
+        return rr,pp,zz
+
 def load_file(num,base='snapshot',gamma=1.0001):
     with h5py.File('{}_{:03d}.hdf5'.format(base,num),'r') as f:
         time = f['Header'].attrs['Time']
@@ -17,7 +218,7 @@ def load_file(num,base='snapshot',gamma=1.0001):
 
         density = f['PartType0/Density'][...]
         mass = f['PartType0/Masses'][...]
-        smooth = f['PartType0/SmoothingLengt'][...]
+        smooth = f['PartType0/SmoothingLength'][...]
         e = f['PartType0/InternalEnergy'][...]
         temp = gamma*e
         #pres = e*density *(gamma-1)
@@ -69,6 +270,15 @@ class Snap():
 
         self.vol = self.mass/self.dens
         self.gamma = gamma
+
+    def to_mesh(self,ri,ro,nr):
+        print('Converting to uniform mesh')
+        self.mesh = Mesh(ri,ro,nr)
+        print('{:d} x {:d} points'.format(len(self.mesh.r),len(self.mesh.phi)))
+        print('Interpolating...')
+
+        self.mesh.add_points(convert_to_sph(self))
+
     def plot2d(self,val='dens',func=None,rmax=3,rmin=.05,cart=True,lims=None,fig=None,ax=None,**kargs):
         import matplotlib.colors as colors
         import matplotlib.tri as tri
